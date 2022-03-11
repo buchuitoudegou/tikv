@@ -29,6 +29,8 @@ use crate::sst_writer::{RawSSTWriter, TxnSSTWriter};
 use crate::Config;
 use crate::{Error, Result};
 
+use resource_metering::{ResourceMeteringTag, ResourceTagFactory};
+
 /// SSTImporter manages SST files that are waiting for ingesting.
 pub struct SSTImporter {
     dir: ImportDir,
@@ -36,6 +38,7 @@ pub struct SSTImporter {
     switcher: ImportModeSwitcher,
     api_version: ApiVersion,
     compression_types: HashMap<CfName, SstCompressionType>,
+    pub resource_tag_factory: ResourceTagFactory,
 }
 
 impl SSTImporter {
@@ -44,6 +47,7 @@ impl SSTImporter {
         root: P,
         key_manager: Option<Arc<DataKeyManager>>,
         api_version: ApiVersion,
+        resource_tag_factory: ResourceTagFactory,
     ) -> Result<SSTImporter> {
         let switcher = ImportModeSwitcher::new(cfg);
         Ok(SSTImporter {
@@ -52,6 +56,7 @@ impl SSTImporter {
             switcher,
             api_version,
             compression_types: HashMap::with_capacity(2),
+            resource_tag_factory,
         })
     }
 
@@ -112,10 +117,21 @@ impl SSTImporter {
             .check_api_version(metas, self.key_manager.clone(), self.api_version)
     }
 
-    pub fn ingest<E: KvEngine>(&self, metas: &[SSTMetaInfo], engine: &E) -> Result<()> {
+    pub fn ingest<E: KvEngine>(
+        &self,
+        context: &[kvproto::kvrpcpb::Context],
+        metas: &[SSTMetaInfo],
+        engine: &E,
+    ) -> Result<()> {
+        let resource_tag_factory = self.resource_tag_factory.clone();
+        let tags: Vec<ResourceMeteringTag> = context
+            .iter()
+            .map(|ctx| resource_tag_factory.new_tag(ctx))
+            .collect();
+        let key_manager = self.key_manager.clone();
         match self
             .dir
-            .ingest(metas, engine, self.key_manager.clone(), self.api_version)
+            .ingest(tags, metas, engine, key_manager, self.api_version)
         {
             Ok(..) => {
                 info!("ingest"; "metas" => ?metas);

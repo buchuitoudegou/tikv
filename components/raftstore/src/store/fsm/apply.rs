@@ -32,6 +32,7 @@ use engine_traits::{
 use engine_traits::{SSTMetaInfo, ALL_CFS, CF_DEFAULT, CF_LOCK, CF_RAFT, CF_WRITE};
 use fail::fail_point;
 use kvproto::import_sstpb::SstMeta;
+use kvproto::kvrpcpb::Context as KvContext;
 use kvproto::kvrpcpb::ExtraOp as TxnExtraOp;
 use kvproto::metapb::{PeerRole, Region, RegionEpoch};
 use kvproto::raft_cmdpb::{
@@ -398,6 +399,7 @@ where
 
     /// The ssts waiting to be ingested in `write_to_db`.
     pending_ssts: Vec<SSTMetaInfo>,
+    pending_ctx: Vec<KvContext>,
 
     /// The pending inspector should be cleaned at the end of a write.
     pending_latency_inspect: Vec<LatencyInspector>,
@@ -456,6 +458,7 @@ where
             priority,
             yield_high_latency_operation: cfg.apply_batch_system.low_priority_pool_size > 0,
             pending_ssts: vec![],
+            pending_ctx: vec![],
             pending_latency_inspect: vec![],
             apply_wait: APPLY_TASK_WAIT_TIME_HISTOGRAM.local(),
             apply_time: APPLY_TIME_HISTOGRAM.local(),
@@ -505,7 +508,7 @@ where
         if !self.pending_ssts.is_empty() {
             let tag = self.tag.clone();
             self.importer
-                .ingest(&self.pending_ssts, &self.engine)
+                .ingest(&self.pending_ctx, &self.pending_ssts, &self.engine)
                 .unwrap_or_else(|e| {
                     panic!(
                         "{} failed to ingest ssts {:?}: {:?}",
@@ -513,6 +516,7 @@ where
                     );
                 });
             self.pending_ssts = vec![];
+            self.pending_ctx = vec![];
         }
         if !self.kv_wb_mut().is_empty() {
             let mut write_opts = engine_traits::WriteOptions::new();
@@ -1675,7 +1679,7 @@ where
     ) -> Result<()> {
         PEER_WRITE_CMD_COUNTER.ingest_sst.inc();
         let sst = req.get_ingest_sst().get_sst();
-
+        let kv_ctx = req.get_ingest_sst().get_context().clone();
         if let Err(e) = check_sst_for_ingestion(sst, &self.region) {
             error!(?e;
                  "ingest fail";
@@ -1692,6 +1696,7 @@ where
         match ctx.importer.validate(sst) {
             Ok(meta_info) => {
                 ctx.pending_ssts.push(meta_info.clone());
+                ctx.pending_ctx.push(kv_ctx);
                 ssts.push(meta_info)
             }
             Err(e) => {

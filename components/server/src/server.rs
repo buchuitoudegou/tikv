@@ -774,7 +774,7 @@ impl<ER: RaftEngine> TiKVServer<ER> {
                 cop_read_pool_handle,
                 self.concurrency_manager.clone(),
                 engine_rocks::raw_util::to_raw_perf_level(self.config.coprocessor.perf_level),
-                resource_tag_factory,
+                resource_tag_factory.clone(),
             ),
             coprocessor_v2::Endpoint::new(&self.config.coprocessor_v2),
             self.router.clone(),
@@ -801,6 +801,7 @@ impl<ER: RaftEngine> TiKVServer<ER> {
             import_path,
             self.encryption_key_manager.clone(),
             self.config.storage.api_version(),
+            resource_tag_factory.clone(),
         )
         .unwrap();
         for (cf_name, compression_type) in &[

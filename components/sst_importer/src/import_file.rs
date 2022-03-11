@@ -19,6 +19,9 @@ use uuid::{Builder as UuidBuilder, Uuid};
 use crate::metrics::*;
 use crate::{Error, Result};
 
+use futures::executor::block_on;
+use resource_metering::{FutureExt, ResourceMeteringTag};
+
 // `SyncableWrite` extends io::Write with sync
 trait SyncableWrite: io::Write + Send {
     // sync all metadata to storage
@@ -331,6 +334,7 @@ impl ImportDir {
 
     pub fn ingest<E: KvEngine>(
         &self,
+        mut tags: Vec<ResourceMeteringTag>,
         metas: &[SSTMetaInfo],
         engine: &E,
         key_manager: Option<Arc<DataKeyManager>>,
@@ -350,6 +354,8 @@ impl ImportDir {
         }
 
         let mut paths = HashMap::new();
+        let mut cf_to_tag = HashMap::new();
+        let mut idx = 0;
         let mut ingest_bytes = 0;
         for info in metas {
             let path = self.join(&info.meta)?;
@@ -357,11 +363,21 @@ impl ImportDir {
             super::prepare_sst_for_ingestion(&path.save, &path.clone, key_manager.as_deref())?;
             ingest_bytes += info.total_bytes;
             paths.entry(cf).or_insert_with(Vec::new).push(path);
+            let tag = tags.remove(idx);
+            cf_to_tag.insert(cf, tag);
+            idx = idx + 1;
         }
 
         for (cf, cf_paths) in paths {
             let files: Vec<&str> = cf_paths.iter().map(|p| p.clone.to_str().unwrap()).collect();
-            engine.ingest_external_file_cf(cf, &files)?;
+            if let Some(tag) = cf_to_tag.remove(&cf) {
+                block_on(
+                    async move { engine.ingest_external_file_cf(cf, &files) }
+                        .in_resource_metering_tag(tag),
+                )?;
+            } else {
+                block_on(async move { engine.ingest_external_file_cf(cf, &files) })?;
+            }
         }
         INPORTER_INGEST_COUNT.observe(metas.len() as _);
         IMPORTER_INGEST_BYTES.observe(ingest_bytes as _);

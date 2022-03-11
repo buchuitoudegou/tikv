@@ -35,6 +35,8 @@ use crate::import::duplicate_detect::DuplicateDetector;
 use sst_importer::metrics::*;
 use sst_importer::{error_inc, sst_meta_to_path, Config, Error, Result, SSTImporter};
 
+use resource_metering::FutureExt;
+
 /// ImportSSTService provides tikv-server with the ability to ingest SST files.
 ///
 /// It saves the SST sent from client to a file and then sends a command to
@@ -389,6 +391,11 @@ where
         let engine = self.engine.clone();
         let start = Instant::now();
 
+        let tag = self
+            .importer
+            .resource_tag_factory
+            .new_tag(req.get_context());
+
         let handle_task = async move {
             // Records how long the download task waits to be scheduled.
             sst_importer::metrics::IMPORTER_DOWNLOAD_DURATION
@@ -405,15 +412,19 @@ where
                 .into_option()
                 .filter(|c| c.cipher_type != EncryptionMethod::Plaintext);
 
-            let res = importer.download::<E>(
-                req.get_sst(),
-                req.get_storage_backend(),
-                req.get_name(),
-                req.get_rewrite_rule(),
-                cipher,
-                limiter,
-                engine,
-            );
+            let res = async move {
+                return importer.download::<E>(
+                    req.get_sst(),
+                    req.get_storage_backend(),
+                    req.get_name(),
+                    req.get_rewrite_rule(),
+                    cipher,
+                    limiter,
+                    engine,
+                );
+            }
+            .in_resource_metering_tag(tag)
+            .await;
             let mut resp = DownloadResponse::default();
             match res {
                 Ok(range) => match range {
