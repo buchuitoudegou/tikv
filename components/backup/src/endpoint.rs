@@ -23,6 +23,7 @@ use online_config::OnlineConfig;
 use raft::StateRole;
 use raftstore::coprocessor::RegionInfoProvider;
 use raftstore::store::util::find_peer;
+use resource_metering::{FutureExt, ResourceTagFactory};
 use tikv::config::BackupConfig;
 use tikv::storage::kv::{CursorBuilder, Engine, ScanMode, SnapContext};
 use tikv::storage::mvcc::Error as MvccError;
@@ -59,6 +60,7 @@ struct Request {
     compression_type: CompressionType,
     compression_level: i32,
     cipher: CipherInfo,
+    kv_context: kvproto::kvrpcpb::Context,
 }
 
 /// Backup Task.
@@ -116,6 +118,7 @@ impl Task {
                 cf,
                 compression_type: req.get_compression_type(),
                 compression_level: req.get_compression_level(),
+                kv_context: req.get_context().clone(),
                 cipher: req.cipher_info.unwrap_or_else(|| {
                     let mut cipher = CipherInfo::default();
                     cipher.set_cipher_type(EncryptionMethod::Plaintext);
@@ -619,6 +622,7 @@ pub struct Endpoint<E: Engine, R: RegionInfoProvider + Clone + 'static> {
     concurrency_manager: ConcurrencyManager,
     softlimit: SoftLimitKeeper,
     api_version: ApiVersion,
+    pub resource_tag_factory: ResourceTagFactory,
 
     pub(crate) engine: E,
     pub(crate) region_info: R,
@@ -740,6 +744,7 @@ impl<E: Engine, R: RegionInfoProvider + Clone + 'static> Endpoint<E, R> {
         config: BackupConfig,
         concurrency_manager: ConcurrencyManager,
         api_version: ApiVersion,
+        resource_tag_factory: ResourceTagFactory,
     ) -> Endpoint<E, R> {
         let pool = ControlThreadPool::new();
         let rt = utils::create_tokio_runtime(config.io_thread_size, "backup-io").unwrap();
@@ -757,6 +762,7 @@ impl<E: Engine, R: RegionInfoProvider + Clone + 'static> Endpoint<E, R> {
             config_manager,
             concurrency_manager,
             api_version,
+            resource_tag_factory,
         }
     }
 
@@ -798,6 +804,7 @@ impl<E: Engine, R: RegionInfoProvider + Clone + 'static> Endpoint<E, R> {
         let batch_size = self.config_manager.0.read().unwrap().batch_size;
         let sst_max_size = self.config_manager.0.read().unwrap().sst_max_size.0;
         let limit = self.softlimit.limit();
+        let resource_tag_factory = self.resource_tag_factory.clone();
 
         self.pool.borrow_mut().spawn(async move {
             loop {
@@ -851,6 +858,7 @@ impl<E: Engine, R: RegionInfoProvider + Clone + 'static> Endpoint<E, R> {
                     });
                     let name = backup_file_name(store_id, &brange.region, key);
                     let ct = to_sst_compression_type(request.compression_type);
+                    let tag = resource_tag_factory.new_tag(&request.kv_context);
 
                     let stat = if is_raw_kv {
                         brange
@@ -865,6 +873,7 @@ impl<E: Engine, R: RegionInfoProvider + Clone + 'static> Endpoint<E, R> {
                                 request.cipher.clone(),
                                 saver_tx.clone(),
                             )
+                            .in_resource_metering_tag(tag)
                             .await
                     } else {
                         let writer_builder = BackupWriterBuilder::new(
@@ -886,6 +895,7 @@ impl<E: Engine, R: RegionInfoProvider + Clone + 'static> Endpoint<E, R> {
                                 start_ts,
                                 saver_tx.clone(),
                             )
+                            .in_resource_metering_tag(tag)
                             .await
                     };
                     match stat {

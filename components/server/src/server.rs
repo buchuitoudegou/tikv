@@ -1038,6 +1038,7 @@ impl<ER: RaftEngine> TiKVServer<ER> {
             self.config.backup.clone(),
             self.concurrency_manager.clone(),
             self.config.storage.api_version(),
+            servers.importer.resource_tag_factory.clone(),
         );
         self.cfg_controller.as_mut().unwrap().register(
             tikv::config::Module::Backup,

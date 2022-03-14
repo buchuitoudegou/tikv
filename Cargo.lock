@@ -396,6 +396,7 @@ dependencies = [
  "raft",
  "raftstore",
  "rand 0.8.3",
+ "resource_metering",
  "security",
  "serde",
  "serde_derive",
@@ -2390,7 +2391,7 @@ dependencies = [
 [[package]]
 name = "kvproto"
 version = "0.0.2"
-source = "git+https://github.com/buchuitoudegou/kvproto?branch=test-topsql#d4d7fa2d15c14aa74d320fc5ba23d380463afc52"
+source = "git+https://github.com/buchuitoudegou/kvproto?branch=test-topsql#6798bf838bf9943d46fd9bbc32d3842872eba06a"
 dependencies = [
  "futures 0.3.15",
  "grpcio",
