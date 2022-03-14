@@ -163,7 +163,7 @@ where
         label: &'static str,
         ssts: Vec<SstMeta>,
     ) -> impl Future<Output = Result<IngestResponse>> {
-        let header = make_request_header(context);
+        let header = make_request_header(context.clone());
         let snapshot_res = Self::async_snapshot(self.router.clone(), header.clone());
         let router = self.router.clone();
         let importer = self.importer.clone();
@@ -192,6 +192,7 @@ where
                 let mut ingest = Request::default();
                 ingest.set_cmd_type(CmdType::IngestSst);
                 ingest.mut_ingest_sst().set_sst(sst.clone());
+                ingest.mut_ingest_sst().set_context(context.clone());
                 cmd.mut_requests().push(ingest);
             }
 
