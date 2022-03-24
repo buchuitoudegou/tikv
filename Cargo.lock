@@ -2391,7 +2391,7 @@ dependencies = [
 [[package]]
 name = "kvproto"
 version = "0.0.2"
-source = "git+https://github.com/buchuitoudegou/kvproto?branch=test-topsql#6798bf838bf9943d46fd9bbc32d3842872eba06a"
+source = "git+https://github.com/buchuitoudegou/kvproto?branch=test-topsql#374b2d9d8bccb2692173b5731c1f3997a96f75b2"
 dependencies = [
  "futures 0.3.15",
  "grpcio",

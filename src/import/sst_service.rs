@@ -248,6 +248,7 @@ macro_rules! impl_write {
             let (rx, buf_driver) =
                 create_stream_with_buffer(stream, self.cfg.stream_channel_window);
             let mut rx = rx.map_err(Error::from);
+            let resource_tag_factory = self.importer.resource_tag_factory.clone();
 
             let timer = Instant::now_coarse();
             let label = stringify!($fn);
@@ -269,13 +270,21 @@ macro_rules! impl_write {
                             return Err(Error::InvalidChunk);
                         }
                     };
+                    let temp_factory = resource_tag_factory.clone();
                     let writer = rx
-                        .try_fold(writer, |mut writer, req| async move {
+                        .try_fold(writer, |mut writer, req| async {
+                            let ctx = req.get_context().clone();
                             let batch = match req.chunk {
                                 Some($chunk_ty::Batch(b)) => b,
                                 _ => return Err(Error::InvalidChunk),
                             };
-                            writer.write(batch)?;
+                            let tag = temp_factory.new_tag(&ctx);
+                            async {
+                                info!("writing kv pairs...");
+                                writer.write(batch)
+                            }
+                            .in_resource_metering_tag(tag)
+                            .await?;
                             Ok(writer)
                         })
                         .await?;

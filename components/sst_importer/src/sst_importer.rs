@@ -375,6 +375,7 @@ impl SSTImporter {
             IMPORTER_DOWNLOAD_DURATION
                 .with_label_values(&["rename"])
                 .observe(start_rename_rewrite.saturating_elapsed().as_secs_f64());
+            info!("no need to rewrite keys");
             return Ok(Some(range));
         }
 
